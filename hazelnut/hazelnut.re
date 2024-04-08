@@ -1,5 +1,5 @@
 open Sexplib.Std;
-// open Monad_lib.Monad; // Uncomment this line to use the maybe monad
+open Monad_lib.Monad; // Uncomment this line to use the maybe monad
 
 let compare_string = String.compare;
 let compare_int = Int.compare;
@@ -97,24 +97,74 @@ let erase_exp = (e: Zexp.t): Hexp.t => {
   raise(Unimplemented);
 };
 
-let syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
-  // Used to suppress unused variable warnings
-  // Okay to remove
-  let _ = ctx;
-  let _ = e;
 
-  raise(Unimplemented);
+let rec consistent = (a: Htyp.t, b: Htyp.t): bool => {
+  (a == Hole || b == Hole) || (a == b) || {
+    switch ({
+      let* (a_in, a_out) = switch (a)
+      {
+      | Arrow(t_in, t_out) => Some((t_in, t_out))
+      | _ => None
+      };
+      let* (b_in, b_out) = switch (b)
+      {
+      | Arrow(t_in, t_out) => Some((t_in, t_out))
+      | _ => None
+      };
+      Some(consistent(a_in, b_in) && consistent(a_out, b_out))
+    })
+    {
+    | Some(bool) => bool
+    | None => false
+    }
+  }
+}
+
+let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
+  switch (e)
+  {
+  | Var(name) => TypCtx.find_opt(name, ctx) // 1a
+  | Ap(a, b) => // 1b
+  {
+    let* ap_type = syn(ctx, a);
+    let* (in_ty, out_ty) = switch (ap_type)
+    {
+    | Hole => Some((Htyp.Hole, Htyp.Hole))
+    | Arrow(t_1, t_2) => Some((t_1, t_2))
+    | _ => None
+    };
+    switch (ana(ctx, b, in_ty)) {
+    | true => Some(out_ty)
+    | false => None
+    }
+  }
+  | Lit(_) => Some(Num) // 1c
+  | Plus(a, b) => switch (ana(ctx, a, Num) && ana(ctx, b, Num)) // 1d
+    {
+    | true => Some(Num)
+    | false => None 
+    }
+  | Asc(exp, typ) => switch (ana(ctx, exp, typ)) // 1e
+    {
+    | true => Some(typ)
+    | false => None
+    }
+  | EHole => Some(Hole) // 1f
+  | NEHole(_) => Some(Hole) // 1g 
+  | _ => None
+  }
 }
 
 and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
-  // Used to suppress unused variable warnings
-  // Okay to remove
-  let _ = ctx;
-  let _ = e;
-  let _ = t;
+  let* (in_ty, out_ty) = switch (ap_type)
+    {
+    | Hole => Some((Htyp.Hole, Htyp.Hole))
+    | Arrow(t_1, t_2) => Some((t_1, t_2))
+    | _ => None
+    };
 
   raise(Unimplemented);
-};
+}
 
 let syn_action =
     (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
