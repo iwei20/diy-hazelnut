@@ -97,74 +97,80 @@ let erase_exp = (e: Zexp.t): Hexp.t => {
   raise(Unimplemented);
 };
 
-
 let rec consistent = (a: Htyp.t, b: Htyp.t): bool => {
-  (a == Hole || b == Hole) || (a == b) || {
-    switch ({
-      let* (a_in, a_out) = switch (a)
+  (a == Hole || b == Hole)
+  || a == b
+  || {
+    switch (
       {
-      | Arrow(t_in, t_out) => Some((t_in, t_out))
-      | _ => None
-      };
-      let* (b_in, b_out) = switch (b)
-      {
-      | Arrow(t_in, t_out) => Some((t_in, t_out))
-      | _ => None
-      };
-      Some(consistent(a_in, b_in) && consistent(a_out, b_out))
-    })
-    {
+        let* (a_in, a_out) =
+          switch (a) {
+          | Arrow(t_in, t_out) => Some((t_in, t_out))
+          | _ => None
+          };
+        let* (b_in, b_out) =
+          switch (b) {
+          | Arrow(t_in, t_out) => Some((t_in, t_out))
+          | _ => None
+          };
+        Some(consistent(a_in, b_in) && consistent(a_out, b_out));
+      }
+    ) {
     | Some(bool) => bool
     | None => false
-    }
-  }
-}
+    };
+  };
+};
 
 let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
-  switch (e)
-  {
+  switch (e) {
   | Var(name) => TypCtx.find_opt(name, ctx) // 1a
-  | Ap(a, b) => // 1b
-  {
+  | Ap(a, b) =>
+    // 1b
     let* ap_type = syn(ctx, a);
-    let* (in_ty, out_ty) = switch (ap_type)
-    {
-    | Hole => Some((Htyp.Hole, Htyp.Hole))
-    | Arrow(t_1, t_2) => Some((t_1, t_2))
-    | _ => None
-    };
-    switch (ana(ctx, b, in_ty)) {
-    | true => Some(out_ty)
-    | false => None
-    }
-  }
+    let* (in_ty, out_ty) =
+      switch (ap_type) {
+      | Hole => Some((Htyp.Hole, Htyp.Hole))
+      | Arrow(t_1, t_2) => Some((t_1, t_2))
+      | _ => None
+      };
+    ana(ctx, b, in_ty) ? Some(out_ty) : None;
   | Lit(_) => Some(Num) // 1c
-  | Plus(a, b) => switch (ana(ctx, a, Num) && ana(ctx, b, Num)) // 1d
-    {
-    | true => Some(Num)
-    | false => None 
-    }
-  | Asc(exp, typ) => switch (ana(ctx, exp, typ)) // 1e
-    {
-    | true => Some(typ)
-    | false => None
-    }
+  | Plus(a, b) =>
+    ana(ctx, a, Num) && ana(ctx, b, Num)
+      // 1d
+      ? Some(Num) : None
+  | Asc(exp, typ) =>
+    ana(ctx, exp, typ)
+      // 1e
+      ? Some(typ) : None
   | EHole => Some(Hole) // 1f
-  | NEHole(_) => Some(Hole) // 1g 
+  | NEHole(_) => Some(Hole) // 1g
   | _ => None
-  }
+  };
 }
 
 and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
-  let* (in_ty, out_ty) = switch (ap_type)
-    {
-    | Hole => Some((Htyp.Hole, Htyp.Hole))
-    | Arrow(t_1, t_2) => Some((t_1, t_2))
-    | _ => None
-    };
+  switch (e) {
+  // Double check: can Lam take the other branch?
+  | Lam(var, body_e) =>
+    switch (t) {
+    | Hole => ana(TypCtx.add(var, Htyp.Hole, ctx), body_e, Htyp.Hole) // 2a
+    | Arrow(t_1, t_2) => ana(TypCtx.add(var, t_1, ctx), body_e, t_2)  // 2a
+    | _ => // 2b as backup
+      switch (syn(ctx, e)) {
+      | Some(syn_ty) => consistent(t, syn_ty)
+      | None => false
+      }
+    }
 
-  raise(Unimplemented);
-}
+  | _ => // 2b
+    switch (syn(ctx, e)) {
+    | Some(syn_ty) => consistent(t, syn_ty)
+    | None => false
+    }
+  };
+};
 
 let syn_action =
     (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
