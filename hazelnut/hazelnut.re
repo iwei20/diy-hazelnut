@@ -97,29 +97,25 @@ let erase_exp = (e: Zexp.t): Hexp.t => {
   raise(Unimplemented);
 };
 
+let extract_arrow = (tau: Htyp.t): option((Htyp.t, Htyp.t)) => {
+  switch (tau) {
+  | Hole => Some((Hole, Hole)) // DOUBLE CHECK
+  | Arrow(t_in, t_out) => Some((t_in, t_out))
+  | _ => None
+  };
+};
+
 let rec consistent = (a: Htyp.t, b: Htyp.t): bool => {
   (a == Hole || b == Hole)
   || a == b
-  || {
-    switch (
-      {
-        let* (a_in, a_out) =
-          switch (a) {
-          | Arrow(t_in, t_out) => Some((t_in, t_out))
-          | _ => None
-          };
-        let* (b_in, b_out) =
-          switch (b) {
-          | Arrow(t_in, t_out) => Some((t_in, t_out))
-          | _ => None
-          };
-        Some(consistent(a_in, b_in) && consistent(a_out, b_out));
-      }
-    ) {
-    | Some(bool) => bool
-    | None => false
-    };
-  };
+  || Option.value(
+       {
+         let* (a_in, a_out) = extract_arrow(a);
+         let* (b_in, b_out) = extract_arrow(b);
+         Some(consistent(a_in, b_in) && consistent(a_out, b_out));
+       },
+       ~default=false,
+     );
 };
 
 let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
@@ -128,12 +124,7 @@ let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
   | Ap(a, b) =>
     // 1b
     let* ap_type = syn(ctx, a);
-    let* (in_ty, out_ty) =
-      switch (ap_type) {
-      | Hole => Some((Htyp.Hole, Htyp.Hole))
-      | Arrow(t_1, t_2) => Some((t_1, t_2))
-      | _ => None
-      };
+    let* (in_ty, out_ty) = extract_arrow(ap_type);
     ana(ctx, b, in_ty) ? Some(out_ty) : None;
   | Lit(_) => Some(Num) // 1c
   | Plus(a, b) =>
@@ -156,15 +147,17 @@ and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
   | Lam(var, body_e) =>
     switch (t) {
     | Hole => ana(TypCtx.add(var, Htyp.Hole, ctx), body_e, Htyp.Hole) // 2a
-    | Arrow(t_1, t_2) => ana(TypCtx.add(var, t_1, ctx), body_e, t_2)  // 2a
-    | _ => // 2b as backup
+    | Arrow(t_1, t_2) => ana(TypCtx.add(var, t_1, ctx), body_e, t_2) // 2a
+    | _ =>
+      // 2b as backup
       switch (syn(ctx, e)) {
       | Some(syn_ty) => consistent(t, syn_ty)
       | None => false
       }
     }
 
-  | _ => // 2b
+  | _ =>
+    // 2b
     switch (syn(ctx, e)) {
     | Some(syn_ty) => consistent(t, syn_ty)
     | None => false
