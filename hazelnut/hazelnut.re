@@ -89,12 +89,26 @@ type typctx = TypCtx.t(Htyp.t);
 
 exception Unimplemented;
 
-let erase_exp = (e: Zexp.t): Hexp.t => {
-  // Used to suppress unused variable warnings
-  // Okay to remove
-  let _ = e;
+let rec erase_typ = (ty: Ztyp.t): Htyp.t => {
+  switch (ty) {
+  | Cursor(under_curs_typ) => under_curs_typ
+  | LArrow(t_in, t_out) => Arrow(erase_typ(t_in), t_out)
+  | RArrow(t_in, t_out) => Arrow(t_in, erase_typ(t_out))
+  }
+};
 
-  raise(Unimplemented);
+let rec erase_exp = (e: Zexp.t): Hexp.t => {
+  switch (e) {
+  | Cursor(under_curs_exp) => under_curs_exp
+  | Lam(var, body_exp) => Lam(var, erase_exp(body_exp))
+  | LAp(func, arg) => Ap(erase_exp(func), arg)
+  | RAp(func, arg) => Ap(func, erase_exp(arg))
+  | LPlus(lhs, rhs) => Plus(erase_exp(lhs), rhs)
+  | RPlus(lhs, rhs) => Plus(lhs, erase_exp(rhs))
+  | LAsc(typed_exp, typ) => Asc(erase_exp(typed_exp), typ)
+  | RAsc(typed_exp, typ) => Asc(typed_exp, erase_typ(typ))
+  | NEHole(subexp) => NEHole(erase_exp(subexp))
+  }
 };
 
 let extract_arrow = (tau: Htyp.t): option((Htyp.t, Htyp.t)) => {
