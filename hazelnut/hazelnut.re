@@ -179,7 +179,7 @@ and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
   };
 };
 
-let syn_move_child_1 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
+let move_child_1 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
   switch (under_curs_exp) {
   | Var(_) => None
   | Lam(var, lamexp) => Some(Lam(var, Cursor(lamexp))) // 8e
@@ -192,7 +192,7 @@ let syn_move_child_1 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
   };
 };
 
-let syn_move_child_2 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
+let move_child_2 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
   switch (under_curs_exp) {
   | Var(_) => None
   | Lam(_, _) => None
@@ -219,20 +219,15 @@ let cursor_extract_typ = (typ: Ztyp.t): option(Htyp.t) => {
   };
 };
 
-let syn_move =
-    ((e: Zexp.t, t: Htyp.t), dir: Dir.t): option((Zexp.t, Htyp.t)) => {
+let do_move = (e: Zexp.t, dir: Dir.t): option(Zexp.t) => {
   // Moves are type independent (7ab), so if the move is valid, second return is always t
   switch (dir) {
   | Child(child_dir) =>
     switch (e) {
     | Cursor(under_curs_exp) =>
       switch (child_dir) {
-      | One =>
-        let* result = syn_move_child_1(under_curs_exp); // 8aegko
-        Some((result, t));
-      | Two =>
-        let* result = syn_move_child_2(under_curs_exp); // 8bhl
-        Some((result, t));
+      | One => move_child_1(under_curs_exp) // 8aegko
+      | Two => move_child_2(under_curs_exp) // 8bhl
       }
     | _ => None
     }
@@ -242,35 +237,35 @@ let syn_move =
     | Lam(var, lamexp) =>
       // 8f
       let* extract_result = cursor_extract_exp(lamexp);
-      Some((Zexp.Cursor(Lam(var, extract_result)), t));
+      Some(Zexp.Cursor(Lam(var, extract_result)));
     | LAp(applier, input) =>
       // 8i
       let* extract_result = cursor_extract_exp(applier);
-      Some((Zexp.Cursor(Ap(extract_result, input)), t));
+      Some(Zexp.Cursor(Ap(extract_result, input)));
     | RAp(applier, input) =>
       // 8j
       let* extract_result = cursor_extract_exp(input);
-      Some((Zexp.Cursor(Ap(applier, extract_result)), t));
+      Some(Zexp.Cursor(Ap(applier, extract_result)));
     | LPlus(a, b) =>
       // 8m
       let* extract_result = cursor_extract_exp(a);
-      Some((Zexp.Cursor(Plus(extract_result, b)), t));
+      Some(Zexp.Cursor(Plus(extract_result, b)));
     | RPlus(a, b) =>
       // 8n
       let* extract_result = cursor_extract_exp(b);
-      Some((Zexp.Cursor(Plus(a, extract_result)), t));
+      Some(Zexp.Cursor(Plus(a, extract_result)));
     | LAsc(typed_exp, typ) =>
       // 8c
       let* extract_result = cursor_extract_exp(typed_exp);
-      Some((Zexp.Cursor(Asc(extract_result, typ)), t));
+      Some(Zexp.Cursor(Asc(extract_result, typ)));
     | RAsc(typed_exp, typ) =>
       // 8d
       let* extract_result = cursor_extract_typ(typ);
-      Some((Zexp.Cursor(Asc(typed_exp, extract_result)), t));
+      Some(Zexp.Cursor(Asc(typed_exp, extract_result)));
     | NEHole(hole_contents) =>
       // 8p
       let* extract_result = cursor_extract_exp(hole_contents);
-      Some((Zexp.Cursor(NEHole(extract_result)), t));
+      Some(Zexp.Cursor(NEHole(extract_result)));
     }
   };
 };
@@ -279,19 +274,17 @@ let syn_action =
     (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
     : option((Zexp.t, Htyp.t)) => {
   switch (a) {
-  | Move(dir) => syn_move((e, t), dir)
+  | Move(dir) =>
+    let* move_result = do_move(e, dir);
+    Some((move_result, t));
   | _ => raise(Unimplemented)
   };
 }
 
 and ana_action =
     (ctx: typctx, e: Zexp.t, a: Action.t, t: Htyp.t): option(Zexp.t) => {
-  // Used to suppress unused variable warnings
-  // Okay to remove
-  let _ = ctx;
-  let _ = e;
-  let _ = a;
-  let _ = t;
-
-  raise(Unimplemented);
+  switch (a) {
+  | Move(dir) => do_move(e, dir)
+  | _ => raise(Unimplemented)
+  };
 };
