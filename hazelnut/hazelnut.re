@@ -135,6 +135,7 @@ let rec consistent = (a: Htyp.t, b: Htyp.t): bool => {
 let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
   switch (e) {
   | Var(name) => TypCtx.find_opt(name, ctx) // 1a
+  | Lam(_, _) => None
   | Ap(a, b) =>
     // 1b
     let* ap_type = syn(ctx, a);
@@ -151,7 +152,6 @@ let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
       ? Some(typ) : None
   | EHole => Some(Hole) // 1f
   | NEHole(_) => Some(Hole) // 1g
-  | _ => None
   };
 }
 
