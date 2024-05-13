@@ -94,7 +94,7 @@ let rec erase_typ = (ty: Ztyp.t): Htyp.t => {
   | Cursor(under_curs_typ) => under_curs_typ
   | LArrow(t_in, t_out) => Arrow(erase_typ(t_in), t_out)
   | RArrow(t_in, t_out) => Arrow(t_in, erase_typ(t_out))
-  }
+  };
 };
 
 let rec erase_exp = (e: Zexp.t): Hexp.t => {
@@ -108,7 +108,7 @@ let rec erase_exp = (e: Zexp.t): Hexp.t => {
   | LAsc(typed_exp, typ) => Asc(erase_exp(typed_exp), typ)
   | RAsc(typed_exp, typ) => Asc(typed_exp, erase_typ(typ))
   | NEHole(subexp) => NEHole(erase_exp(subexp))
-  }
+  };
 };
 
 let extract_arrow = (tau: Htyp.t): option((Htyp.t, Htyp.t)) => {
@@ -179,17 +179,109 @@ and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
   };
 };
 
+let syn_move_child_1 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
+  switch (under_curs_exp) {
+  | Var(_) => None
+  | Lam(var, lamexp) => Some(Lam(var, Cursor(lamexp))) // 8e
+  | Ap(applier, input) => Some(LAp(Cursor(applier), input)) // 8g
+  | Lit(_) => None
+  | Plus(a, b) => Some(LPlus(Cursor(a), b)) // 8k
+  | Asc(typed_exp, typ) => Some(LAsc(Cursor(typed_exp), typ)) // 8a
+  | EHole => None
+  | NEHole(hole_contents) => Some(Cursor(hole_contents)) // 8o
+  };
+};
+
+let syn_move_child_2 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
+  switch (under_curs_exp) {
+  | Var(_) => None
+  | Lam(_, _) => None
+  | Ap(applier, input) => Some(RAp(applier, Cursor(input))) // 8h
+  | Lit(_) => None
+  | Plus(a, b) => Some(RPlus(a, Cursor(b))) // 8l
+  | Asc(typed_exp, typ) => Some(RAsc(typed_exp, Cursor(typ))) // 8b
+  | EHole => None
+  | NEHole(_) => None
+  };
+};
+
+let cursor_extract_exp = (e: Zexp.t): option(Hexp.t) => {
+  switch (e) {
+  | Cursor(under_curs_exp) => Some(under_curs_exp)
+  | _ => None
+  };
+};
+
+let cursor_extract_typ = (typ: Ztyp.t): option(Htyp.t) => {
+  switch (typ) {
+  | Cursor(under_curs_typ) => Some(under_curs_typ)
+  | _ => None
+  };
+};
+
+let syn_move =
+    ((e: Zexp.t, t: Htyp.t), dir: Dir.t): option((Zexp.t, Htyp.t)) => {
+  // Moves are type independent (7ab), so if the move is valid, second return is always t
+  switch (dir) {
+  | Child(child_dir) =>
+    switch (e) {
+    | Cursor(under_curs_exp) =>
+      switch (child_dir) {
+      | One =>
+        let* result = syn_move_child_1(under_curs_exp); // 8aegko
+        Some((result, t));
+      | Two =>
+        let* result = syn_move_child_2(under_curs_exp); // 8bhl
+        Some((result, t));
+      }
+    | _ => None
+    }
+  | Parent =>
+    switch (e) {
+    | Cursor(_) => None
+    | Lam(var, lamexp) =>
+      // 8f
+      let* extract_result = cursor_extract_exp(lamexp);
+      Some((Zexp.Cursor(Lam(var, extract_result)), t));
+    | LAp(applier, input) =>
+      // 8i
+      let* extract_result = cursor_extract_exp(applier);
+      Some((Zexp.Cursor(Ap(extract_result, input)), t));
+    | RAp(applier, input) =>
+      // 8j
+      let* extract_result = cursor_extract_exp(input);
+      Some((Zexp.Cursor(Ap(applier, extract_result)), t));
+    | LPlus(a, b) =>
+      // 8m
+      let* extract_result = cursor_extract_exp(a);
+      Some((Zexp.Cursor(Plus(extract_result, b)), t));
+    | RPlus(a, b) =>
+      // 8n
+      let* extract_result = cursor_extract_exp(b);
+      Some((Zexp.Cursor(Plus(a, extract_result)), t));
+    | LAsc(typed_exp, typ) =>
+      // 8c
+      let* extract_result = cursor_extract_exp(typed_exp);
+      Some((Zexp.Cursor(Asc(extract_result, typ)), t));
+    | RAsc(typed_exp, typ) =>
+      // 8d
+      let* extract_result = cursor_extract_typ(typ);
+      Some((Zexp.Cursor(Asc(typed_exp, extract_result)), t));
+    | NEHole(hole_contents) =>
+      // 8p
+      let* extract_result = cursor_extract_exp(hole_contents);
+      Some((Zexp.Cursor(NEHole(extract_result)), t));
+    }
+  };
+};
+
 let syn_action =
     (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
     : option((Zexp.t, Htyp.t)) => {
-  // Used to suppress unused variable warnings
-  // Okay to remove
-  let _ = ctx;
-  let _ = e;
-  let _ = t;
-  let _ = a;
-
-  raise(Unimplemented);
+  switch (a) {
+  | Move(dir) => syn_move((e, t), dir)
+  | _ => raise(Unimplemented)
+  };
 }
 
 and ana_action =
