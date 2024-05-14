@@ -179,6 +179,7 @@ and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
   };
 };
 
+/* MOVE */
 let move_child_1 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
   switch (under_curs_exp) {
   | Var(_) => None
@@ -205,14 +206,14 @@ let move_child_2 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
   };
 };
 
-let cursor_extract_exp = (e: Zexp.t): option(Hexp.t) => {
+let shallow_cursor_extract_exp = (e: Zexp.t): option(Hexp.t) => {
   switch (e) {
   | Cursor(under_curs_exp) => Some(under_curs_exp)
   | _ => None
   };
 };
 
-let cursor_extract_typ = (typ: Ztyp.t): option(Htyp.t) => {
+let shallow_cursor_extract_typ = (typ: Ztyp.t): option(Htyp.t) => {
   switch (typ) {
   | Cursor(under_curs_typ) => Some(under_curs_typ)
   | _ => None
@@ -236,39 +237,42 @@ let do_move = (e: Zexp.t, dir: Dir.t): option(Zexp.t) => {
     | Cursor(_) => None
     | Lam(var, lamexp) =>
       // 8f
-      let* extract_result = cursor_extract_exp(lamexp);
+      let* extract_result = shallow_cursor_extract_exp(lamexp);
       Some(Zexp.Cursor(Lam(var, extract_result)));
     | LAp(applier, input) =>
       // 8i
-      let* extract_result = cursor_extract_exp(applier);
+      let* extract_result = shallow_cursor_extract_exp(applier);
       Some(Zexp.Cursor(Ap(extract_result, input)));
     | RAp(applier, input) =>
       // 8j
-      let* extract_result = cursor_extract_exp(input);
+      let* extract_result = shallow_cursor_extract_exp(input);
       Some(Zexp.Cursor(Ap(applier, extract_result)));
     | LPlus(a, b) =>
       // 8m
-      let* extract_result = cursor_extract_exp(a);
+      let* extract_result = shallow_cursor_extract_exp(a);
       Some(Zexp.Cursor(Plus(extract_result, b)));
     | RPlus(a, b) =>
       // 8n
-      let* extract_result = cursor_extract_exp(b);
+      let* extract_result = shallow_cursor_extract_exp(b);
       Some(Zexp.Cursor(Plus(a, extract_result)));
     | LAsc(typed_exp, typ) =>
       // 8c
-      let* extract_result = cursor_extract_exp(typed_exp);
+      let* extract_result = shallow_cursor_extract_exp(typed_exp);
       Some(Zexp.Cursor(Asc(extract_result, typ)));
     | RAsc(typed_exp, typ) =>
       // 8d
-      let* extract_result = cursor_extract_typ(typ);
+      let* extract_result = shallow_cursor_extract_typ(typ);
       Some(Zexp.Cursor(Asc(typed_exp, extract_result)));
     | NEHole(hole_contents) =>
       // 8p
-      let* extract_result = cursor_extract_exp(hole_contents);
+      let* extract_result = shallow_cursor_extract_exp(hole_contents);
       Some(Zexp.Cursor(NEHole(extract_result)));
     }
   };
 };
+
+/* CONSTRUCT */
+
 
 let syn_action =
     (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
