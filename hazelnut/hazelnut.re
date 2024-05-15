@@ -221,7 +221,6 @@ let shallow_cursor_extract_typ = (typ: Ztyp.t): option(Htyp.t) => {
 };
 
 let do_move = (e: Zexp.t, dir: Dir.t): option(Zexp.t) => {
-  // Moves are type independent (7ab), so if the move is valid, second return is always t
   switch (dir) {
   | Child(child_dir) =>
     switch (e) {
@@ -273,22 +272,64 @@ let do_move = (e: Zexp.t, dir: Dir.t): option(Zexp.t) => {
 
 /* CONSTRUCT */
 
-
-let syn_action =
-    (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
+let do_construct_exp =
+    (ctx: typctx, (e: Zexp.t, t: Htyp.t), cnstr_shape: Shape.t)
     : option((Zexp.t, Htyp.t)) => {
+  switch (cnstr_shape) {
+  | Arrow => None // 12a These are shapes for types
+  | Num => None // 12b These are shapes for types
+  | Asc =>
+    // 13ab
+    let* ce = shallow_cursor_extract_exp(e);
+    // Cursor moves to annotation; same type syn/ana
+    Some((Zexp.RAsc(ce, Ztyp.Cursor(t)), t));
+  | Var(varname) => None
+  | Lam(input_name) => None
+  | Ap => None
+  | Lit(n) => None
+  | Plus => None
+  | NEHole => None
+  };
+};
+
+// WONTFIX: 6abcd are types
+// WONTFIX: 9b 10ab 11ab are actionlist
+// WONTFIX: 12ab are types
+
+let rec syn_action =
+        (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
+        : option((Zexp.t, Htyp.t)) => {
   switch (a) {
   | Move(dir) =>
+    // Moves are type independent (7ab), so if the move is valid, second return is always t
     let* move_result = do_move(e, dir);
     Some((move_result, t));
   | _ => raise(Unimplemented)
   };
 }
 
+and subsumption =
+    (ctx: typctx, e: Zexp.t, a: Action.t, t: Htyp.t): option(Zexp.t) => {
+  // Subsumption 5
+  let e_erased = erase_exp(e); // ehat-erased
+  let* e_erased_syn_ty = syn(ctx, e_erased); // ehat-erased => tau'
+  let* (e_acted, t_syn_act) = syn_action(ctx, (e, e_erased_syn_ty), a); // ehat => tau' a-> ehat' => tau''
+  if (consistent(t, t_syn_act)) { // tau \sim tau''
+    Some(e_acted); // Judgement!
+  } else {
+    None;
+  };
+}
+
 and ana_action =
     (ctx: typctx, e: Zexp.t, a: Action.t, t: Htyp.t): option(Zexp.t) => {
-  switch (a) {
+  let result = switch (a) {
   | Move(dir) => do_move(e, dir)
   | _ => raise(Unimplemented)
   };
+  // Algorithmically, subsumption should be the rule of last resort (see Sec. 3.4 for further discussion.)
+  switch (result) {
+  | Some(_) => result
+  | None => subsumption(ctx, e, a, t)
+  }
 };
