@@ -297,11 +297,65 @@ let syn_construct_exp =
       }
     | _ => None
     };
-  | Lam(input_name) => raise(Unimplemented)
-  | Ap => raise(Unimplemented)
-  | Lit(n) => raise(Unimplemented)
-  | Plus => raise(Unimplemented)
-  | NEHole => raise(Unimplemented)
+  | Lam(input_name) =>
+    // 13e
+    // Must be an empty hole synthesizing EHole
+    let* ce = shallow_cursor_extract_exp(e);
+    switch (ce) {
+    | EHole =>
+      switch (t) {
+      | Hole =>
+        Some((
+          Zexp.RAsc(
+            Hexp.Lam(input_name, Hexp.EHole),
+            Ztyp.LArrow(Ztyp.Cursor(Htyp.Hole), Htyp.Hole),
+          ),
+          Htyp.Arrow(Htyp.Hole, Htyp.Hole),
+        ))
+      | _ => None
+      }
+    | _ => None
+    };
+  | Ap =>
+    let+ ce = shallow_cursor_extract_exp(e);
+    switch (extract_arrow(t)) {
+    // 13h
+    | Some((_, out_ty)) => (Zexp.RAp(ce, Zexp.Cursor(Hexp.EHole)), out_ty)
+    // 13i
+    | None => (
+        Zexp.RAp(Hexp.NEHole(ce), Zexp.Cursor(Hexp.EHole)),
+        Htyp.Hole,
+      )
+    };
+
+  | Lit(n) =>
+    // 13j
+    // Must be an empty hole synthesizing EHole
+    let* ce = shallow_cursor_extract_exp(e);
+    switch (ce) {
+    | EHole =>
+      switch (t) {
+      | Hole => Some((Zexp.Cursor(Hexp.Lit(n)), Htyp.Num))
+      | _ => None
+      }
+    | _ => None
+    };
+  | Plus =>
+    let+ ce = shallow_cursor_extract_exp(e);
+    if (consistent(t, Htyp.Num)) {
+      (
+        Zexp.RPlus(ce, Zexp.Cursor(Hexp.EHole)),
+        Htyp.Num // 13l
+      );
+    } else {
+      (
+        Zexp.RPlus(Hexp.NEHole(ce), Zexp.Cursor(Hexp.EHole)),
+        Htyp.Hole // 13m
+      );
+    };
+  | NEHole =>
+    let+ _ = shallow_cursor_extract_exp(e); // Verify it has a cursor
+    (Zexp.NEHole(e), Htyp.Hole);
   };
 };
 
@@ -317,6 +371,7 @@ let rec syn_action =
     // Moves are type independent (7a), so if the move is valid, second return is always t
     let+ move_result = do_move(e, dir);
     (move_result, t);
+  | Construct(shape) => syn_construct_exp(ctx, (e, t), shape)
   | _ => raise(Unimplemented)
   };
 }
