@@ -327,13 +327,7 @@ and subsumption =
   let e_erased = erase_exp(e); // ehat-erased
   let* e_erased_syn_ty = syn(ctx, e_erased); // ehat-erased => tau'
   let* (e_acted, t_syn_act) = syn_action(ctx, (e, e_erased_syn_ty), a); // ehat => tau' a-> ehat' => tau''
-  if (consistent(t, t_syn_act)) {
-    // tau \sim tau''
-    Some
-      (e_acted); // Judgement!
-  } else {
-    None;
-  };
+  consistent(t, t_syn_act) ? Some(e_acted) : None; // tau \sim tau''
 }
 
 and ana_action =
