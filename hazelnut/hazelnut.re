@@ -125,8 +125,8 @@ let rec consistent = (a: Htyp.t, b: Htyp.t): bool => {
   || Option.value(
        {
          let* (a_in, a_out) = extract_arrow(a);
-         let* (b_in, b_out) = extract_arrow(b);
-         Some(consistent(a_in, b_in) && consistent(a_out, b_out));
+         let+ (b_in, b_out) = extract_arrow(b);
+         consistent(a_in, b_in) && consistent(a_out, b_out);
        },
        ~default=false,
      );
@@ -236,54 +236,67 @@ let do_move = (e: Zexp.t, dir: Dir.t): option(Zexp.t) => {
     | Cursor(_) => None
     | Lam(var, lamexp) =>
       // 8f
-      let* extract_result = shallow_cursor_extract_exp(lamexp);
-      Some(Zexp.Cursor(Lam(var, extract_result)));
+      let+ extract_result = shallow_cursor_extract_exp(lamexp);
+      Zexp.Cursor(Lam(var, extract_result));
     | LAp(applier, input) =>
       // 8i
-      let* extract_result = shallow_cursor_extract_exp(applier);
-      Some(Zexp.Cursor(Ap(extract_result, input)));
+      let+ extract_result = shallow_cursor_extract_exp(applier);
+      Zexp.Cursor(Ap(extract_result, input));
     | RAp(applier, input) =>
       // 8j
-      let* extract_result = shallow_cursor_extract_exp(input);
-      Some(Zexp.Cursor(Ap(applier, extract_result)));
+      let+ extract_result = shallow_cursor_extract_exp(input);
+      Zexp.Cursor(Ap(applier, extract_result));
     | LPlus(a, b) =>
       // 8m
-      let* extract_result = shallow_cursor_extract_exp(a);
-      Some(Zexp.Cursor(Plus(extract_result, b)));
+      let+ extract_result = shallow_cursor_extract_exp(a);
+      Zexp.Cursor(Plus(extract_result, b));
     | RPlus(a, b) =>
       // 8n
-      let* extract_result = shallow_cursor_extract_exp(b);
-      Some(Zexp.Cursor(Plus(a, extract_result)));
+      let+ extract_result = shallow_cursor_extract_exp(b);
+      Zexp.Cursor(Plus(a, extract_result));
     | LAsc(typed_exp, typ) =>
       // 8c
-      let* extract_result = shallow_cursor_extract_exp(typed_exp);
-      Some(Zexp.Cursor(Asc(extract_result, typ)));
+      let+ extract_result = shallow_cursor_extract_exp(typed_exp);
+      Zexp.Cursor(Asc(extract_result, typ));
     | RAsc(typed_exp, typ) =>
       // 8d
-      let* extract_result = shallow_cursor_extract_typ(typ);
-      Some(Zexp.Cursor(Asc(typed_exp, extract_result)));
+      let+ extract_result = shallow_cursor_extract_typ(typ);
+      Zexp.Cursor(Asc(typed_exp, extract_result));
     | NEHole(hole_contents) =>
       // 8p
-      let* extract_result = shallow_cursor_extract_exp(hole_contents);
-      Some(Zexp.Cursor(NEHole(extract_result)));
+      let+ extract_result = shallow_cursor_extract_exp(hole_contents);
+      Zexp.Cursor(NEHole(extract_result));
     }
   };
 };
 
 /* CONSTRUCT */
 
-let do_construct_exp =
+let syn_construct_exp =
     (ctx: typctx, (e: Zexp.t, t: Htyp.t), cnstr_shape: Shape.t)
     : option((Zexp.t, Htyp.t)) => {
   switch (cnstr_shape) {
   | Arrow => None // 12a These are shapes for types
   | Num => None // 12b These are shapes for types
   | Asc =>
-    // 13ab
+    // 13a
+    let+ ce = shallow_cursor_extract_exp(e);
+    // Cursor moves to annotation
+    (Zexp.RAsc(ce, Ztyp.Cursor(t)), t);
+  | Var(varname) =>
+    // 13c
+    // Must be an empty hole synthesizing EHole
     let* ce = shallow_cursor_extract_exp(e);
-    // Cursor moves to annotation; same type syn/ana
-    Some((Zexp.RAsc(ce, Ztyp.Cursor(t)), t));
-  | Var(varname) => None
+    switch (ce) {
+    | EHole =>
+      switch (t) {
+      | Hole =>
+        let+ type_from_ctx = TypCtx.find_opt(varname, ctx);
+        (Zexp.Cursor(Hexp.Var(varname)), type_from_ctx);
+      | _ => None
+      }
+    | _ => None
+    };
   | Lam(input_name) => None
   | Ap => None
   | Lit(n) => None
@@ -301,9 +314,9 @@ let rec syn_action =
         : option((Zexp.t, Htyp.t)) => {
   switch (a) {
   | Move(dir) =>
-    // Moves are type independent (7ab), so if the move is valid, second return is always t
-    let* move_result = do_move(e, dir);
-    Some((move_result, t));
+    // Moves are type independent (7a), so if the move is valid, second return is always t
+    let+ move_result = do_move(e, dir);
+    (move_result, t);
   | _ => raise(Unimplemented)
   };
 }
@@ -314,8 +327,10 @@ and subsumption =
   let e_erased = erase_exp(e); // ehat-erased
   let* e_erased_syn_ty = syn(ctx, e_erased); // ehat-erased => tau'
   let* (e_acted, t_syn_act) = syn_action(ctx, (e, e_erased_syn_ty), a); // ehat => tau' a-> ehat' => tau''
-  if (consistent(t, t_syn_act)) { // tau \sim tau''
-    Some(e_acted); // Judgement!
+  if (consistent(t, t_syn_act)) {
+    // tau \sim tau''
+    Some
+      (e_acted); // Judgement!
   } else {
     None;
   };
@@ -323,13 +338,14 @@ and subsumption =
 
 and ana_action =
     (ctx: typctx, e: Zexp.t, a: Action.t, t: Htyp.t): option(Zexp.t) => {
-  let result = switch (a) {
-  | Move(dir) => do_move(e, dir)
-  | _ => raise(Unimplemented)
-  };
+  let result =
+    switch (a) {
+    | Move(dir) => do_move(e, dir) // 7b analytic move judgement independent of type
+    | _ => raise(Unimplemented)
+    };
   // Algorithmically, subsumption should be the rule of last resort (see Sec. 3.4 for further discussion.)
   switch (result) {
   | Some(_) => result
   | None => subsumption(ctx, e, a, t)
-  }
+  };
 };
