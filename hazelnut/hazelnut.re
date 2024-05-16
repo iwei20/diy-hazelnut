@@ -297,11 +297,11 @@ let syn_construct_exp =
       }
     | _ => None
     };
-  | Lam(input_name) => None
-  | Ap => None
-  | Lit(n) => None
-  | Plus => None
-  | NEHole => None
+  | Lam(input_name) => raise(Unimplemented)
+  | Ap => raise(Unimplemented)
+  | Lit(n) => raise(Unimplemented)
+  | Plus => raise(Unimplemented)
+  | NEHole => raise(Unimplemented)
   };
 };
 
