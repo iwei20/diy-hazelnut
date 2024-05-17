@@ -359,6 +359,68 @@ let syn_construct_exp =
   };
 };
 
+let ana_construct_exp =
+    (ctx: typctx, e: Zexp.t, cnstr_shape: Shape.t, t: Htyp.t): option(Zexp.t) => {
+  switch (cnstr_shape) {
+  | Arrow => None
+  | Num => None
+  | Asc =>
+    // 13b
+    let+ ce = shallow_cursor_extract_exp(e);
+    // Cursor moves to annotation
+    Zexp.RAsc(ce, Ztyp.Cursor(t));
+  | Var(varname) =>
+    // 13d
+    let* ce = shallow_cursor_extract_exp(e);
+    switch (ce) {
+    // require empty hole
+    | EHole =>
+      let* vartyp_from_ctx = TypCtx.find_opt(varname, ctx);
+      // not consistent ? 13d : subsumption
+      !consistent(vartyp_from_ctx, t)
+        ? Some(Zexp.NEHole(Zexp.Cursor(Hexp.Var(varname)))) : None;
+    | _ => None
+    };
+  | Lam(input_name) =>
+    let* ce = shallow_cursor_extract_exp(e);
+    switch (ce) {
+    // require empty hole
+    | EHole =>
+      switch (extract_arrow(t)) {
+      // 13f
+      | Some((_, _)) => Some(Zexp.Lam(input_name, Zexp.Cursor(Hexp.EHole)))
+      // 13g
+      | None =>
+        Some(
+          Zexp.NEHole(
+            Zexp.RAsc(
+              Hexp.Lam(input_name, Hexp.EHole),
+              Ztyp.LArrow(Ztyp.Cursor(Htyp.Hole), Htyp.Hole),
+            ),
+          ),
+        )
+      }
+    | _ => None
+    };
+  | Ap => None // subsumption
+  | Lit(n) =>
+    let* ce = shallow_cursor_extract_exp(e);
+    switch (ce) {
+    // require empty hole
+    | EHole =>
+      if (!consistent(t, Htyp.Num)) {
+        // 13k
+        Some(Zexp.NEHole(Zexp.Cursor(Hexp.Lit(n))));
+      } else {
+        None;
+      }
+    | _ => None
+    };
+  | Plus => None // subsumption
+  | NEHole => None // subsumption
+  };
+};
+
 // WONTFIX: 6abcd are types
 // WONTFIX: 9b 10ab 11ab are actionlist
 // WONTFIX: 12ab are types
@@ -390,6 +452,7 @@ and ana_action =
   let result =
     switch (a) {
     | Move(dir) => do_move(e, dir) // 7b analytic move judgement independent of type
+    | Construct(shape) => ana_construct_exp(ctx, e, shape, t)
     | _ => raise(Unimplemented)
     };
   // Algorithmically, subsumption should be the rule of last resort (see Sec. 3.4 for further discussion.)
