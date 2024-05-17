@@ -135,7 +135,6 @@ let shallow_cursor_extract_typ = (typ: Ztyp.t): option(Htyp.t) => {
   };
 };
 
-
 let rec consistent = (a: Htyp.t, b: Htyp.t): bool => {
   (a == Hole || b == Hole)
   || a == b
@@ -206,24 +205,24 @@ let do_move_typ = (t: Ztyp.t, d: Dir.t): option(Ztyp.t) => {
     // Only arrows have child-movement rules
     | Arrow(ty_in, ty_out) =>
       switch (which) {
-        // 6a
-      | One => Some(Ztyp.LArrow(Ztyp.Cursor(ty_in), ty_out));
-        // 6b
-      | Two => Some(Ztyp.RArrow(ty_in, Ztyp.Cursor(ty_out)));
+      // 6a
+      | One => Some(Ztyp.LArrow(Ztyp.Cursor(ty_in), ty_out))
+      // 6b
+      | Two => Some(Ztyp.RArrow(ty_in, Ztyp.Cursor(ty_out)))
       }
     | _ => None
-    }  
+    };
   | Parent =>
     switch (t) {
     | Cursor(_) => None
     | LArrow(ty_in, ty_out) =>
       // 6c
       let+ cty_in = shallow_cursor_extract_typ(ty_in);
-      Ztyp.Cursor(Htyp.Arrow(cty_in, ty_out)); 
+      Ztyp.Cursor(Htyp.Arrow(cty_in, ty_out));
     | RArrow(ty_in, ty_out) =>
       // 6d
       let+ cty_out = shallow_cursor_extract_typ(ty_out);
-      Ztyp.Cursor(Htyp.Arrow(ty_in, cty_out)); 
+      Ztyp.Cursor(Htyp.Arrow(ty_in, cty_out));
     }
   };
 };
@@ -305,6 +304,25 @@ let do_move_exp = (e: Zexp.t, dir: Dir.t): option(Zexp.t) => {
 };
 
 /* CONSTRUCT */
+let construct_typ = (t: Ztyp.t, cnstr_shape: Shape.t): option(Ztyp.t) => {
+  switch (cnstr_shape) {
+  // 12a
+  | Arrow =>
+    // Must be under cursor
+    let+ ct = shallow_cursor_extract_typ(t);
+    Ztyp.RArrow(ct, Ztyp.Cursor(Htyp.Hole));
+  // 12b
+  | Num =>
+    // Must be under cursor
+    let* ct = shallow_cursor_extract_typ(t);
+    // Must be a hole
+    switch (ct) {
+    | Hole => Some(Ztyp.Cursor(Htyp.Num))
+    | _ => None
+    };
+  | _ => None // These shapes are for expressions
+  };
+};
 
 let syn_construct_exp =
     (ctx: typctx, (e: Zexp.t, t: Htyp.t), cnstr_shape: Shape.t)
@@ -462,9 +480,7 @@ let do_delete_exp = (e: Zexp.t): option(Zexp.t) => {
   Zexp.Cursor(Hexp.EHole);
 };
 
-// TODO: 6abcd are types
 // WONTFIX: 9b 10ab 11ab are actionlist
-// TODO: 12ab are types
 // TODO: 14 is a type
 
 let rec syn_action =
@@ -499,7 +515,7 @@ and ana_action =
     switch (a) {
     | Move(dir) => do_move_exp(e, dir) // 7b analytic move judgement independent of type
     | Construct(shape) => ana_construct_exp(ctx, e, shape, t)
-      // 15b
+    // 15b
     | Del => do_delete_exp(e)
     | _ => raise(Unimplemented)
     };
