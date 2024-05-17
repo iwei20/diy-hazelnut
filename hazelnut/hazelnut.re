@@ -443,6 +443,7 @@ let rec syn_action =
     (move_result, t);
   | Construct(shape) => syn_construct_exp(ctx, (e, t), shape)
   | Del =>
+    // 15a
     let+ del_result = do_delete(e);
     (del_result, Htyp.Hole);
   | _ => raise(Unimplemented)
@@ -464,6 +465,7 @@ and ana_action =
     switch (a) {
     | Move(dir) => do_move(e, dir) // 7b analytic move judgement independent of type
     | Construct(shape) => ana_construct_exp(ctx, e, shape, t)
+      // 15b
     | Del => do_delete(e)
     | _ => raise(Unimplemented)
     };
