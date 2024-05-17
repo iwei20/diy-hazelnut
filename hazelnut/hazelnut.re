@@ -119,6 +119,23 @@ let extract_arrow = (tau: Htyp.t): option((Htyp.t, Htyp.t)) => {
   };
 };
 
+// e must be of type Zexp.Cursor; extracts expression in cursor.
+let shallow_cursor_extract_exp = (e: Zexp.t): option(Hexp.t) => {
+  switch (e) {
+  | Cursor(under_curs_exp) => Some(under_curs_exp)
+  | _ => None
+  };
+};
+
+// t must be of type Ztyp.Cursor; extracts expression in cursor.
+let shallow_cursor_extract_typ = (typ: Ztyp.t): option(Htyp.t) => {
+  switch (typ) {
+  | Cursor(under_curs_typ) => Some(under_curs_typ)
+  | _ => None
+  };
+};
+
+
 let rec consistent = (a: Htyp.t, b: Htyp.t): bool => {
   (a == Hole || b == Hole)
   || a == b
@@ -180,6 +197,37 @@ and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
 };
 
 /* MOVE */
+let do_move_typ = (t: Ztyp.t, d: Dir.t): option(Ztyp.t) => {
+  switch (d) {
+  | Child(which) =>
+    // Must be under cursor
+    let* ct = shallow_cursor_extract_typ(t);
+    switch (ct) {
+    // Only arrows have child-movement rules
+    | Arrow(ty_in, ty_out) =>
+      switch (which) {
+        // 6a
+      | One => Some(Ztyp.LArrow(Ztyp.Cursor(ty_in), ty_out));
+        // 6b
+      | Two => Some(Ztyp.RArrow(ty_in, Ztyp.Cursor(ty_out)));
+      }
+    | _ => None
+    }  
+  | Parent =>
+    switch (t) {
+    | Cursor(_) => None
+    | LArrow(ty_in, ty_out) =>
+      // 6c
+      let+ cty_in = shallow_cursor_extract_typ(ty_in);
+      Ztyp.Cursor(Htyp.Arrow(cty_in, ty_out)); 
+    | RArrow(ty_in, ty_out) =>
+      // 6d
+      let+ cty_out = shallow_cursor_extract_typ(ty_out);
+      Ztyp.Cursor(Htyp.Arrow(ty_in, cty_out)); 
+    }
+  };
+};
+
 let move_child_1 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
   switch (under_curs_exp) {
   | Var(_) => None
@@ -203,20 +251,6 @@ let move_child_2 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
   | Asc(typed_exp, typ) => Some(RAsc(typed_exp, Cursor(typ))) // 8b
   | EHole => None
   | NEHole(_) => None
-  };
-};
-
-let shallow_cursor_extract_exp = (e: Zexp.t): option(Hexp.t) => {
-  switch (e) {
-  | Cursor(under_curs_exp) => Some(under_curs_exp)
-  | _ => None
-  };
-};
-
-let shallow_cursor_extract_typ = (typ: Ztyp.t): option(Htyp.t) => {
-  switch (typ) {
-  | Cursor(under_curs_typ) => Some(under_curs_typ)
-  | _ => None
   };
 };
 
