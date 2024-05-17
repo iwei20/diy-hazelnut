@@ -474,6 +474,13 @@ let ana_construct_exp =
 };
 
 /* DELETION */
+
+// 14
+let delete_typ = (t: Ztyp.t): option(Ztyp.t) => {
+  let+ _ = shallow_cursor_extract_typ(t);
+  Ztyp.Cursor(Htyp.Hole);
+};
+
 let do_delete_exp = (e: Zexp.t): option(Zexp.t) => {
   // Must be expression under cursor
   let+ _ = shallow_cursor_extract_exp(e);
@@ -481,7 +488,6 @@ let do_delete_exp = (e: Zexp.t): option(Zexp.t) => {
 };
 
 // WONTFIX: 9b 10ab 11ab are actionlist
-// TODO: 14 is a type
 
 let rec syn_action =
         (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
