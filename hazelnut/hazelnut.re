@@ -487,6 +487,41 @@ let do_delete_exp = (e: Zexp.t): option(Zexp.t) => {
   Zexp.Cursor(Hexp.EHole);
 };
 
+/* FINISH */
+let syn_finish =
+    (ctx: typctx, (e: Zexp.t, t: Htyp.t)): option((Zexp.t, Htyp.t)) => {
+  // 16a
+  // Must be expression under cursor
+  let* ce = shallow_cursor_extract_exp(e);
+  // Check LHS t is hole or fail early
+  let* _ =
+    switch (t) {
+    | Hole => Some()
+    | _ => None
+    };
+  switch (ce) {
+  | NEHole(nee) =>
+    let+ syn_ty = syn(ctx, nee);
+    (Zexp.Cursor(nee), syn_ty);
+  | _ => None
+  };
+};
+
+let ana_finish = (ctx: typctx, e: Zexp.t, t: Htyp.t): option(Zexp.t) => {
+  // 16b
+  // Must be expression under cursor
+  let* ce = shallow_cursor_extract_exp(e);
+  switch (ce) {
+  | NEHole(nee) =>
+    if (ana(ctx, nee, t)) {
+      Some(Zexp.Cursor(nee));
+    } else {
+      None;
+    }
+  | _ => None
+  };
+};
+
 // WONTFIX: 9b 10ab 11ab are actionlist
 
 let rec syn_action =
@@ -502,7 +537,7 @@ let rec syn_action =
     // 15a
     let+ del_result = do_delete_exp(e);
     (del_result, Htyp.Hole);
-  | _ => raise(Unimplemented)
+  | Finish => syn_finish(ctx, (e, t))
   };
 }
 
@@ -523,7 +558,7 @@ and ana_action =
     | Construct(shape) => ana_construct_exp(ctx, e, shape, t)
     // 15b
     | Del => do_delete_exp(e)
-    | _ => raise(Unimplemented)
+    | Finish => ana_finish(ctx, e, t)
     };
   // Algorithmically, subsumption should be the rule of last resort (see Sec. 3.4 for further discussion.)
   switch (result) {
