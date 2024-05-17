@@ -421,9 +421,17 @@ let ana_construct_exp =
   };
 };
 
+/* DELETION */
+let do_delete = (e: Zexp.t): option(Zexp.t) => {
+  // Must be expression under cursor
+  let+ _ = shallow_cursor_extract_exp(e);
+  Zexp.Cursor(Hexp.EHole);
+};
+
 // WONTFIX: 6abcd are types
 // WONTFIX: 9b 10ab 11ab are actionlist
 // WONTFIX: 12ab are types
+// WONTFIX: 14 is a type
 
 let rec syn_action =
         (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
@@ -434,6 +442,9 @@ let rec syn_action =
     let+ move_result = do_move(e, dir);
     (move_result, t);
   | Construct(shape) => syn_construct_exp(ctx, (e, t), shape)
+  | Del =>
+    let+ del_result = do_delete(e);
+    (del_result, Htyp.Hole);
   | _ => raise(Unimplemented)
   };
 }
@@ -453,6 +464,7 @@ and ana_action =
     switch (a) {
     | Move(dir) => do_move(e, dir) // 7b analytic move judgement independent of type
     | Construct(shape) => ana_construct_exp(ctx, e, shape, t)
+    | Del => do_delete(e)
     | _ => raise(Unimplemented)
     };
   // Algorithmically, subsumption should be the rule of last resort (see Sec. 3.4 for further discussion.)
