@@ -523,6 +523,35 @@ let ana_finish = (ctx: typctx, e: Zexp.t, t: Htyp.t): option(Zexp.t) => {
 };
 
 // WONTFIX: 9b 10ab 11ab are actionlist
+let rec action_typ = (t: Ztyp.t, a: Action.t): option(Ztyp.t) => {
+  // Base case
+  let result = switch (a) {
+  | Move(dir) => do_move_typ(t, dir)
+  | Construct(shape) => construct_typ(t, shape)
+  | Del => delete_typ(t)
+  | Finish => None
+  };
+  switch (result) {
+  | Some(result) => Some(result)
+  | None => 
+    // Zipper cases
+    switch (t) {
+    | LArrow(in_ty, out_ty) =>
+      // 17a
+      switch (action_typ(in_ty, a)) {
+      | Some(in_ty_modified) => Some(Ztyp.LArrow(in_ty_modified, out_ty))
+      | None => None
+      }
+    | RArrow(in_ty, out_ty) =>
+      // 17b
+      switch (action_typ(out_ty, a)) {
+      | Some(out_ty_modified) => Some(Ztyp.RArrow(in_ty, out_ty_modified))
+      | None => None
+      }
+    | _ => None
+    }
+  }
+};
 
 let rec syn_action =
         (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
