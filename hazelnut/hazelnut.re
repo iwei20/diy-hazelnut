@@ -220,7 +220,7 @@ let shallow_cursor_extract_typ = (typ: Ztyp.t): option(Htyp.t) => {
   };
 };
 
-let do_move = (e: Zexp.t, dir: Dir.t): option(Zexp.t) => {
+let do_move_exp = (e: Zexp.t, dir: Dir.t): option(Zexp.t) => {
   switch (dir) {
   | Child(child_dir) =>
     switch (e) {
@@ -422,16 +422,16 @@ let ana_construct_exp =
 };
 
 /* DELETION */
-let do_delete = (e: Zexp.t): option(Zexp.t) => {
+let do_delete_exp = (e: Zexp.t): option(Zexp.t) => {
   // Must be expression under cursor
   let+ _ = shallow_cursor_extract_exp(e);
   Zexp.Cursor(Hexp.EHole);
 };
 
-// WONTFIX: 6abcd are types
+// TODO: 6abcd are types
 // WONTFIX: 9b 10ab 11ab are actionlist
-// WONTFIX: 12ab are types
-// WONTFIX: 14 is a type
+// TODO: 12ab are types
+// TODO: 14 is a type
 
 let rec syn_action =
         (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
@@ -439,12 +439,12 @@ let rec syn_action =
   switch (a) {
   | Move(dir) =>
     // Moves are type independent (7a), so if the move is valid, second return is always t
-    let+ move_result = do_move(e, dir);
+    let+ move_result = do_move_exp(e, dir);
     (move_result, t);
   | Construct(shape) => syn_construct_exp(ctx, (e, t), shape)
   | Del =>
     // 15a
-    let+ del_result = do_delete(e);
+    let+ del_result = do_delete_exp(e);
     (del_result, Htyp.Hole);
   | _ => raise(Unimplemented)
   };
@@ -463,10 +463,10 @@ and ana_action =
     (ctx: typctx, e: Zexp.t, a: Action.t, t: Htyp.t): option(Zexp.t) => {
   let result =
     switch (a) {
-    | Move(dir) => do_move(e, dir) // 7b analytic move judgement independent of type
+    | Move(dir) => do_move_exp(e, dir) // 7b analytic move judgement independent of type
     | Construct(shape) => ana_construct_exp(ctx, e, shape, t)
       // 15b
-    | Del => do_delete(e)
+    | Del => do_delete_exp(e)
     | _ => raise(Unimplemented)
     };
   // Algorithmically, subsumption should be the rule of last resort (see Sec. 3.4 for further discussion.)
