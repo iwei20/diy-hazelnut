@@ -557,17 +557,99 @@ let rec action_typ = (t: Ztyp.t, a: Action.t): option(Ztyp.t) => {
 let rec syn_action =
         (ctx: typctx, (e: Zexp.t, t: Htyp.t), a: Action.t)
         : option((Zexp.t, Htyp.t)) => {
-  switch (a) {
-  | Move(dir) =>
-    // Moves are type independent (7a), so if the move is valid, second return is always t
-    let+ move_result = do_move_exp(e, dir);
-    (move_result, t);
-  | Construct(shape) => syn_construct_exp(ctx, (e, t), shape)
-  | Del =>
-    // 15a
-    let+ del_result = do_delete_exp(e);
-    (del_result, Htyp.Hole);
-  | Finish => syn_finish(ctx, (e, t))
+  // Base case
+  let result =
+    switch (a) {
+    | Move(dir) =>
+      // Moves are type independent (7a), so if the move is valid, second return is always t
+      let+ move_result = do_move_exp(e, dir);
+      (move_result, t);
+    | Construct(shape) => syn_construct_exp(ctx, (e, t), shape)
+    | Del =>
+      // 15a
+      let+ del_result = do_delete_exp(e);
+      (del_result, Htyp.Hole);
+    | Finish => syn_finish(ctx, (e, t))
+    };
+  switch (result) {
+  | Some(result) => Some(result)
+  | None =>
+    // Zipper cases
+    switch (e) {
+    | Cursor(_) => None
+    | Lam(_, _) => None
+    | LAp(applier, input) =>
+      // 18b
+      let applier_erased = erase_exp(applier);
+      let* applier_syn_ty = syn(ctx, applier_erased);
+      let* (applier_acted, applier_acted_syn_ty) =
+        syn_action(ctx, (applier, applier_syn_ty), a);
+      let* (ty_in, ty_out) = extract_arrow(applier_acted_syn_ty);
+      if (ana(ctx, input, ty_in)) {
+        Some((Zexp.LAp(applier_acted, input), ty_out));
+      } else {
+        None;
+      };
+    | RAp(applier, input) =>
+      // 18c
+      let* applier_syn_ty = syn(ctx, applier);
+      let* (ty_in, ty_out) = extract_arrow(applier_syn_ty);
+      let+ input_acted = ana_action(ctx, input, a, ty_in);
+      (Zexp.RAp(applier, input_acted), ty_out);
+    | LPlus(lhs, rhs) =>
+      // 18d
+      // check t is Num
+      let* _ =
+        switch (t) {
+        | Num => Some()
+        | _ => None
+        };
+      let+ lhs_acted = ana_action(ctx, lhs, a, Htyp.Num);
+      (Zexp.LPlus(lhs_acted, rhs), Htyp.Num);
+    | RPlus(lhs, rhs) =>
+      // 18e
+      // check t is Num
+      let* _ =
+        switch (t) {
+        | Num => Some()
+        | _ => None
+        };
+      let+ rhs_acted = ana_action(ctx, rhs, a, Htyp.Num);
+      (Zexp.RPlus(lhs, rhs_acted), Htyp.Num);
+    | LAsc(ann_exp, asc_typ) =>
+      // 18f
+      if (t == asc_typ) {
+        let+ ann_exp_acted = ana_action(ctx, ann_exp, a, t);
+        (Zexp.LAsc(ann_exp_acted, t), t);
+      } else {
+        None;
+      }
+    | RAsc(ann_exp, asc_typ) =>
+      // 18g
+      if (t == erase_typ(asc_typ)) {
+        let* asc_typ_acted = action_typ(asc_typ, a);
+        if (ana(ctx, ann_exp, erase_typ(asc_typ_acted))) {
+          Some((
+            Zexp.RAsc(ann_exp, asc_typ_acted),
+            erase_typ(asc_typ_acted),
+          ));
+        } else {
+          None;
+        };
+      } else {
+        None;
+      }
+    | NEHole(in_hole) =>
+      // 18h
+      switch (t) {
+      | Hole =>
+        let in_hole_erased = erase_exp(in_hole);
+        let* in_hole_syn_ty = syn(ctx, in_hole_erased);
+        let+ (e_acted, _) = syn_action(ctx, (in_hole, in_hole_syn_ty), a);
+        (Zexp.NEHole(e_acted), Htyp.Hole);
+      | _ => None
+      }
+    }
   };
 }
 
@@ -582,6 +664,7 @@ and subsumption =
 
 and ana_action =
     (ctx: typctx, e: Zexp.t, a: Action.t, t: Htyp.t): option(Zexp.t) => {
+  // Base case
   let result =
     switch (a) {
     | Move(dir) => do_move_exp(e, dir) // 7b analytic move judgement independent of type
@@ -589,6 +672,21 @@ and ana_action =
     // 15b
     | Del => do_delete_exp(e)
     | Finish => ana_finish(ctx, e, t)
+    };
+  // Zipper case
+  let result =
+    switch (result) {
+    | Some(_) => result
+    | None => 
+      switch (e) {
+      | Lam(varname, body) =>
+        // 18a
+        let* (ty_in, ty_out) = extract_arrow(t);
+        let+ body_acted =
+          ana_action(TypCtx.add(varname, ty_in, ctx), body, a, ty_out);
+        Zexp.Lam(varname, body_acted);
+      | _ => None
+      }
     };
   // Algorithmically, subsumption should be the rule of last resort (see Sec. 3.4 for further discussion.)
   switch (result) {
