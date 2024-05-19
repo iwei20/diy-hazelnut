@@ -274,7 +274,7 @@ let move_child_1 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
   | Plus(lhs, rhs) => Some(LPlus(Cursor(lhs), rhs)) // 8k
   | Asc(ann_exp, asc_typ) => Some(LAsc(Cursor(ann_exp), asc_typ)) // 8a
   | EHole => None
-  | NEHole(hole_exp) => Some(Cursor(hole_exp)) // 8o
+  | NEHole(hole_exp) => Some(NEHole(Cursor(hole_exp))) // 8o
   };
 };
 
