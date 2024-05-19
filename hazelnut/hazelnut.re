@@ -1,5 +1,5 @@
 open Sexplib.Std;
-open Monad_lib.Monad; // Uncomment this line to use the maybe monad
+open Monad_lib.Monad;
 
 let compare_string = String.compare;
 let compare_int = Int.compare;
@@ -89,52 +89,77 @@ type typctx = TypCtx.t(Htyp.t);
 
 exception Unimplemented;
 
-let rec erase_typ = (ty: Ztyp.t): Htyp.t => {
-  switch (ty) {
-  | Cursor(under_curs_typ) => under_curs_typ
-  | LArrow(t_in, t_out) => Arrow(erase_typ(t_in), t_out)
-  | RArrow(t_in, t_out) => Arrow(t_in, erase_typ(t_out))
-  };
-};
-
-let rec erase_exp = (e: Zexp.t): Hexp.t => {
-  switch (e) {
-  | Cursor(under_curs_exp) => under_curs_exp
-  | Lam(var, body_exp) => Lam(var, erase_exp(body_exp))
-  | LAp(func, arg) => Ap(erase_exp(func), arg)
-  | RAp(func, arg) => Ap(func, erase_exp(arg))
-  | LPlus(lhs, rhs) => Plus(erase_exp(lhs), rhs)
-  | RPlus(lhs, rhs) => Plus(lhs, erase_exp(rhs))
-  | LAsc(typed_exp, typ) => Asc(erase_exp(typed_exp), typ)
-  | RAsc(typed_exp, typ) => Asc(typed_exp, erase_typ(typ))
-  | NEHole(subexp) => NEHole(erase_exp(subexp))
-  };
-};
-
-let extract_arrow = (tau: Htyp.t): option((Htyp.t, Htyp.t)) => {
-  switch (tau) {
-  | Hole => Some((Hole, Hole)) // DOUBLE CHECK
-  | Arrow(t_in, t_out) => Some((t_in, t_out))
-  | _ => None
-  };
-};
-
-// e must be of type Zexp.Cursor; extracts expression in cursor.
-let shallow_cursor_extract_exp = (e: Zexp.t): option(Hexp.t) => {
+/**
+ * For top-level cursor Z-expressions, returns the contents inside the cursor.
+ * For other Z-expressions, returns nothing.
+ */
+let shallow_erase_exp = (e: Zexp.t): option(Hexp.t) => {
   switch (e) {
   | Cursor(under_curs_exp) => Some(under_curs_exp)
   | _ => None
   };
 };
 
-// t must be of type Ztyp.Cursor; extracts expression in cursor.
-let shallow_cursor_extract_typ = (typ: Ztyp.t): option(Htyp.t) => {
-  switch (typ) {
+/**
+ * For top-level cursor Z-types, returns the contents inside the cursor.
+ * For other Z-types, returns nothing.
+ */
+let shallow_erase_typ = (t: Ztyp.t): option(Htyp.t) => {
+  switch (t) {
   | Cursor(under_curs_typ) => Some(under_curs_typ)
   | _ => None
   };
 };
 
+/**
+ * Performs cursor-erasure on a Z-expression, as described
+ * in the Hazelnut paper.
+ */
+let rec deep_erase_exp = (e: Zexp.t): Hexp.t => {
+  switch (e) {
+  | Cursor(under_curs_exp) => under_curs_exp
+  | Lam(var, body) => Lam(var, deep_erase_exp(body))
+  | LAp(applier, input) => Ap(deep_erase_exp(applier), input)
+  | RAp(applier, input) => Ap(applier, deep_erase_exp(input))
+  | LPlus(lhs, rhs) => Plus(deep_erase_exp(lhs), rhs)
+  | RPlus(lhs, rhs) => Plus(lhs, deep_erase_exp(rhs))
+  | LAsc(ann_exp, asc_typ) => Asc(deep_erase_exp(ann_exp), asc_typ)
+  | RAsc(ann_exp, asc_typ) => Asc(ann_exp, deep_erase_typ(asc_typ))
+  | NEHole(hole_exp) => NEHole(deep_erase_exp(hole_exp))
+  };
+}
+
+/**
+ * Performs cursor-erasure on a Z-type, as described
+ * in the Hazelnut paper.
+ */
+and deep_erase_typ = (t: Ztyp.t): Htyp.t => {
+  switch (t) {
+  | Cursor(under_curs_typ) => under_curs_typ
+  | LArrow(t_in, t_out) => Arrow(deep_erase_typ(t_in), t_out)
+  | RArrow(t_in, t_out) => Arrow(t_in, deep_erase_typ(t_out))
+  };
+};
+
+/**
+ * Attempts to match the given type as the LHS of
+ * judgement 4a or 4b, and returns the output of that judgement
+ * if a match is found. Otherwise, returns None.
+ *
+ * Note that 4a and 4b are mutually exclusive judgements.
+ */
+let extract_arrow = (t: Htyp.t): option((Htyp.t, Htyp.t)) => {
+  switch (t) {
+  | Hole => Some((Hole, Hole))
+  | Arrow(t_in, t_out) => Some((t_in, t_out))
+  | _ => None
+  };
+};
+
+/**
+ * Returns if a is consistent to b via a match with
+ * judgements 3a-d.
+ */
 let rec consistent = (a: Htyp.t, b: Htyp.t): bool => {
   (a == Hole || b == Hole)
   || a == b
@@ -171,27 +196,28 @@ let rec syn = (ctx: typctx, e: Hexp.t): option(Htyp.t) => {
   };
 }
 
+and subsumption = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
+  switch (syn(ctx, e)) {
+  | Some(syn_ty) => consistent(t, syn_ty)
+  | None => false
+  };
+}
+
 and ana = (ctx: typctx, e: Hexp.t, t: Htyp.t): bool => {
   switch (e) {
-  // Double check: can Lam take the other branch?
-  | Lam(var, body_e) =>
+  | Lam(var, body) =>
     switch (t) {
-    | Hole => ana(TypCtx.add(var, Htyp.Hole, ctx), body_e, Htyp.Hole) // 2a
-    | Arrow(t_1, t_2) => ana(TypCtx.add(var, t_1, ctx), body_e, t_2) // 2a
-    | _ =>
-      // 2b as backup
-      switch (syn(ctx, e)) {
-      | Some(syn_ty) => consistent(t, syn_ty)
-      | None => false
-      }
+    | Hole =>
+      // 2a
+      let extend_ctx = TypCtx.add(var, Htyp.Hole, ctx);
+      ana(extend_ctx, body, Htyp.Hole);
+    | Arrow(t_in, t_out) =>
+      // 2a
+      let extend_ctx = TypCtx.add(var, t_in, ctx);
+      ana(extend_ctx, body, t_out);
+    | _ => subsumption(ctx, e, t)
     }
-
-  | _ =>
-    // 2b
-    switch (syn(ctx, e)) {
-    | Some(syn_ty) => consistent(t, syn_ty)
-    | None => false
-    }
+  | _ => subsumption(ctx, e, t)
   };
 };
 
@@ -200,7 +226,7 @@ let do_move_typ = (t: Ztyp.t, d: Dir.t): option(Ztyp.t) => {
   switch (d) {
   | Child(which) =>
     // Must be under cursor
-    let* ct = shallow_cursor_extract_typ(t);
+    let* ct = shallow_erase_typ(t);
     switch (ct) {
     // Only arrows have child-movement rules
     | Arrow(ty_in, ty_out) =>
@@ -217,11 +243,11 @@ let do_move_typ = (t: Ztyp.t, d: Dir.t): option(Ztyp.t) => {
     | Cursor(_) => None
     | LArrow(ty_in, ty_out) =>
       // 6c
-      let+ cty_in = shallow_cursor_extract_typ(ty_in);
+      let+ cty_in = shallow_erase_typ(ty_in);
       Ztyp.Cursor(Htyp.Arrow(cty_in, ty_out));
     | RArrow(ty_in, ty_out) =>
       // 6d
-      let+ cty_out = shallow_cursor_extract_typ(ty_out);
+      let+ cty_out = shallow_erase_typ(ty_out);
       Ztyp.Cursor(Htyp.Arrow(ty_in, cty_out));
     }
   };
@@ -230,7 +256,7 @@ let do_move_typ = (t: Ztyp.t, d: Dir.t): option(Ztyp.t) => {
 let move_child_1 = (under_curs_exp: Hexp.t): option(Zexp.t) => {
   switch (under_curs_exp) {
   | Var(_) => None
-  | Lam(var, lamexp) => Some(Lam(var, Cursor(lamexp))) // 8e
+  | Lam(var, body) => Some(Lam(var, Cursor(body))) // 8e
   | Ap(applier, input) => Some(LAp(Cursor(applier), input)) // 8g
   | Lit(_) => None
   | Plus(a, b) => Some(LPlus(Cursor(a), b)) // 8k
@@ -267,37 +293,37 @@ let do_move_exp = (e: Zexp.t, dir: Dir.t): option(Zexp.t) => {
   | Parent =>
     switch (e) {
     | Cursor(_) => None
-    | Lam(var, lamexp) =>
+    | Lam(var, body) =>
       // 8f
-      let+ extract_result = shallow_cursor_extract_exp(lamexp);
+      let+ extract_result = shallow_erase_exp(body);
       Zexp.Cursor(Lam(var, extract_result));
     | LAp(applier, input) =>
       // 8i
-      let+ extract_result = shallow_cursor_extract_exp(applier);
+      let+ extract_result = shallow_erase_exp(applier);
       Zexp.Cursor(Ap(extract_result, input));
     | RAp(applier, input) =>
       // 8j
-      let+ extract_result = shallow_cursor_extract_exp(input);
+      let+ extract_result = shallow_erase_exp(input);
       Zexp.Cursor(Ap(applier, extract_result));
     | LPlus(a, b) =>
       // 8m
-      let+ extract_result = shallow_cursor_extract_exp(a);
+      let+ extract_result = shallow_erase_exp(a);
       Zexp.Cursor(Plus(extract_result, b));
     | RPlus(a, b) =>
       // 8n
-      let+ extract_result = shallow_cursor_extract_exp(b);
+      let+ extract_result = shallow_erase_exp(b);
       Zexp.Cursor(Plus(a, extract_result));
     | LAsc(typed_exp, typ) =>
       // 8c
-      let+ extract_result = shallow_cursor_extract_exp(typed_exp);
+      let+ extract_result = shallow_erase_exp(typed_exp);
       Zexp.Cursor(Asc(extract_result, typ));
     | RAsc(typed_exp, typ) =>
       // 8d
-      let+ extract_result = shallow_cursor_extract_typ(typ);
+      let+ extract_result = shallow_erase_typ(typ);
       Zexp.Cursor(Asc(typed_exp, extract_result));
     | NEHole(hole_contents) =>
       // 8p
-      let+ extract_result = shallow_cursor_extract_exp(hole_contents);
+      let+ extract_result = shallow_erase_exp(hole_contents);
       Zexp.Cursor(NEHole(extract_result));
     }
   };
@@ -309,12 +335,12 @@ let construct_typ = (t: Ztyp.t, cnstr_shape: Shape.t): option(Ztyp.t) => {
   // 12a
   | Arrow =>
     // Must be under cursor
-    let+ ct = shallow_cursor_extract_typ(t);
+    let+ ct = shallow_erase_typ(t);
     Ztyp.RArrow(ct, Ztyp.Cursor(Htyp.Hole));
   // 12b
   | Num =>
     // Must be under cursor
-    let* ct = shallow_cursor_extract_typ(t);
+    let* ct = shallow_erase_typ(t);
     // Must be a hole
     switch (ct) {
     | Hole => Some(Ztyp.Cursor(Htyp.Num))
@@ -332,13 +358,13 @@ let syn_construct_exp =
   | Num => None // 12b These are shapes for types
   | Asc =>
     // 13a
-    let+ ce = shallow_cursor_extract_exp(e);
+    let+ ce = shallow_erase_exp(e);
     // Cursor moves to annotation
     (Zexp.RAsc(ce, Ztyp.Cursor(t)), t);
   | Var(varname) =>
     // 13c
     // Must be an empty hole synthesizing EHole
-    let* ce = shallow_cursor_extract_exp(e);
+    let* ce = shallow_erase_exp(e);
     switch (ce) {
     | EHole =>
       switch (t) {
@@ -349,17 +375,17 @@ let syn_construct_exp =
       }
     | _ => None
     };
-  | Lam(input_name) =>
+  | Lam(var) =>
     // 13e
     // Must be an empty hole synthesizing EHole
-    let* ce = shallow_cursor_extract_exp(e);
+    let* ce = shallow_erase_exp(e);
     switch (ce) {
     | EHole =>
       switch (t) {
       | Hole =>
         Some((
           Zexp.RAsc(
-            Hexp.Lam(input_name, Hexp.EHole),
+            Hexp.Lam(var, Hexp.EHole),
             Ztyp.LArrow(Ztyp.Cursor(Htyp.Hole), Htyp.Hole),
           ),
           Htyp.Arrow(Htyp.Hole, Htyp.Hole),
@@ -369,7 +395,7 @@ let syn_construct_exp =
     | _ => None
     };
   | Ap =>
-    let+ ce = shallow_cursor_extract_exp(e);
+    let+ ce = shallow_erase_exp(e);
     switch (extract_arrow(t)) {
     // 13h
     | Some((_, out_ty)) => (Zexp.RAp(ce, Zexp.Cursor(Hexp.EHole)), out_ty)
@@ -383,7 +409,7 @@ let syn_construct_exp =
   | Lit(n) =>
     // 13j
     // Must be an empty hole synthesizing EHole
-    let* ce = shallow_cursor_extract_exp(e);
+    let* ce = shallow_erase_exp(e);
     switch (ce) {
     | EHole =>
       switch (t) {
@@ -393,7 +419,7 @@ let syn_construct_exp =
     | _ => None
     };
   | Plus =>
-    let+ ce = shallow_cursor_extract_exp(e);
+    let+ ce = shallow_erase_exp(e);
     if (consistent(t, Htyp.Num)) {
       (
         Zexp.RPlus(ce, Zexp.Cursor(Hexp.EHole)),
@@ -406,7 +432,7 @@ let syn_construct_exp =
       );
     };
   | NEHole =>
-    let+ _ = shallow_cursor_extract_exp(e); // Verify it has a cursor
+    let+ _ = shallow_erase_exp(e); // Verify it has a cursor
     (Zexp.NEHole(e), Htyp.Hole);
   };
 };
@@ -418,12 +444,12 @@ let ana_construct_exp =
   | Num => None
   | Asc =>
     // 13b
-    let+ ce = shallow_cursor_extract_exp(e);
+    let+ ce = shallow_erase_exp(e);
     // Cursor moves to annotation
     Zexp.RAsc(ce, Ztyp.Cursor(t));
   | Var(varname) =>
     // 13d
-    let* ce = shallow_cursor_extract_exp(e);
+    let* ce = shallow_erase_exp(e);
     switch (ce) {
     // require empty hole
     | EHole =>
@@ -433,20 +459,20 @@ let ana_construct_exp =
         ? Some(Zexp.NEHole(Zexp.Cursor(Hexp.Var(varname)))) : None;
     | _ => None
     };
-  | Lam(input_name) =>
-    let* ce = shallow_cursor_extract_exp(e);
+  | Lam(var) =>
+    let* ce = shallow_erase_exp(e);
     switch (ce) {
     // require empty hole
     | EHole =>
       switch (extract_arrow(t)) {
       // 13f
-      | Some((_, _)) => Some(Zexp.Lam(input_name, Zexp.Cursor(Hexp.EHole)))
+      | Some((_, _)) => Some(Zexp.Lam(var, Zexp.Cursor(Hexp.EHole)))
       // 13g
       | None =>
         Some(
           Zexp.NEHole(
             Zexp.RAsc(
-              Hexp.Lam(input_name, Hexp.EHole),
+              Hexp.Lam(var, Hexp.EHole),
               Ztyp.LArrow(Ztyp.Cursor(Htyp.Hole), Htyp.Hole),
             ),
           ),
@@ -456,7 +482,7 @@ let ana_construct_exp =
     };
   | Ap => None // subsumption
   | Lit(n) =>
-    let* ce = shallow_cursor_extract_exp(e);
+    let* ce = shallow_erase_exp(e);
     switch (ce) {
     // require empty hole
     | EHole =>
@@ -477,13 +503,13 @@ let ana_construct_exp =
 
 // 14
 let delete_typ = (t: Ztyp.t): option(Ztyp.t) => {
-  let+ _ = shallow_cursor_extract_typ(t);
+  let+ _ = shallow_erase_typ(t);
   Ztyp.Cursor(Htyp.Hole);
 };
 
 let do_delete_exp = (e: Zexp.t): option(Zexp.t) => {
   // Must be expression under cursor
-  let+ _ = shallow_cursor_extract_exp(e);
+  let+ _ = shallow_erase_exp(e);
   Zexp.Cursor(Hexp.EHole);
 };
 
@@ -492,7 +518,7 @@ let syn_finish =
     (ctx: typctx, (e: Zexp.t, t: Htyp.t)): option((Zexp.t, Htyp.t)) => {
   // 16a
   // Must be expression under cursor
-  let* ce = shallow_cursor_extract_exp(e);
+  let* ce = shallow_erase_exp(e);
   // Check LHS t is hole or fail early
   let* _ =
     switch (t) {
@@ -510,7 +536,7 @@ let syn_finish =
 let ana_finish = (ctx: typctx, e: Zexp.t, t: Htyp.t): option(Zexp.t) => {
   // 16b
   // Must be expression under cursor
-  let* ce = shallow_cursor_extract_exp(e);
+  let* ce = shallow_erase_exp(e);
   switch (ce) {
   | NEHole(nee) =>
     if (ana(ctx, nee, t)) {
@@ -580,7 +606,7 @@ let rec syn_action =
     | Lam(_, _) => None
     | LAp(applier, input) =>
       // 18b
-      let applier_erased = erase_exp(applier);
+      let applier_erased = deep_erase_exp(applier);
       let* applier_syn_ty = syn(ctx, applier_erased);
       let* (applier_acted, applier_acted_syn_ty) =
         syn_action(ctx, (applier, applier_syn_ty), a);
@@ -626,12 +652,12 @@ let rec syn_action =
       }
     | RAsc(ann_exp, asc_typ) =>
       // 18g
-      if (t == erase_typ(asc_typ)) {
+      if (t == deep_erase_typ(asc_typ)) {
         let* asc_typ_acted = action_typ(asc_typ, a);
-        if (ana(ctx, ann_exp, erase_typ(asc_typ_acted))) {
+        if (ana(ctx, ann_exp, deep_erase_typ(asc_typ_acted))) {
           Some((
             Zexp.RAsc(ann_exp, asc_typ_acted),
-            erase_typ(asc_typ_acted),
+            deep_erase_typ(asc_typ_acted),
           ));
         } else {
           None;
@@ -643,7 +669,7 @@ let rec syn_action =
       // 18h
       switch (t) {
       | Hole =>
-        let in_hole_erased = erase_exp(in_hole);
+        let in_hole_erased = deep_erase_exp(in_hole);
         let* in_hole_syn_ty = syn(ctx, in_hole_erased);
         let+ (e_acted, _) = syn_action(ctx, (in_hole, in_hole_syn_ty), a);
         (Zexp.NEHole(e_acted), Htyp.Hole);
@@ -656,7 +682,7 @@ let rec syn_action =
 and subsumption =
     (ctx: typctx, e: Zexp.t, a: Action.t, t: Htyp.t): option(Zexp.t) => {
   // Subsumption 5
-  let e_erased = erase_exp(e); // ehat-erased
+  let e_erased = deep_erase_exp(e); // ehat-erased
   let* e_erased_syn_ty = syn(ctx, e_erased); // ehat-erased => tau'
   let* (e_acted, t_syn_act) = syn_action(ctx, (e, e_erased_syn_ty), a); // ehat => tau' a-> ehat' => tau''
   consistent(t, t_syn_act) ? Some(e_acted) : None; // tau \sim tau''
@@ -677,14 +703,14 @@ and ana_action =
   let result =
     switch (result) {
     | Some(_) => result
-    | None => 
+    | None =>
       switch (e) {
-      | Lam(varname, body) =>
+      | Lam(var, body) =>
         // 18a
         let* (ty_in, ty_out) = extract_arrow(t);
         let+ body_acted =
-          ana_action(TypCtx.add(varname, ty_in, ctx), body, a, ty_out);
-        Zexp.Lam(varname, body_acted);
+          ana_action(TypCtx.add(var, ty_in, ctx), body, a, ty_out);
+        Zexp.Lam(var, body_acted);
       | _ => None
       }
     };
