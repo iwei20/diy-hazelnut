@@ -679,7 +679,7 @@ let rec syn_action =
   };
 }
 
-and subsumption =
+and subsumption_action =
     (ctx: typctx, e: Zexp.t, a: Action.t, t: Htyp.t): option(Zexp.t) => {
   // Subsumption 5
   let e_erased = deep_erase_exp(e); // ehat-erased
@@ -717,6 +717,6 @@ and ana_action =
   // Algorithmically, subsumption should be the rule of last resort (see Sec. 3.4 for further discussion.)
   switch (result) {
   | Some(_) => result
-  | None => subsumption(ctx, e, a, t)
+  | None => subsumption_action(ctx, e, a, t)
   };
 };
