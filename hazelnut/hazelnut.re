@@ -556,12 +556,12 @@ let ana_construct_exp =
 
 // 14
 let delete_typ = (t: Ztyp.t): option(Ztyp.t) => {
-  let+ _ = shallow_erase_typ(t);
+  let+ _t_cursor_check = shallow_erase_typ(t);
   Ztyp.Cursor(Htyp.Hole);
 };
 
 let do_delete_exp = (e: Zexp.t): option(Zexp.t) => {
-  let+ _ = shallow_erase_exp(e);
+  let+ _e_cursor_check = shallow_erase_exp(e);
   Zexp.Cursor(Hexp.EHole);
 };
 
